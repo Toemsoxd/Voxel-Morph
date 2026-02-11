@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, touch-action=none">
-    <title>Voxel Morph: Multiplayer Lobby & Power-Ups</title>
+    <title>Voxel Morph: Multiplayer 🔫</title>
     
     <!-- Favicon de Emoji 🔫 -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔫</text></svg>">
@@ -11,8 +11,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { touch-action: none; overflow: hidden; }
-        canvas { touch-action: none; }
+        body { touch-action: none; overflow: hidden; background-color: black; }
+        canvas { touch-action: none; display: block; }
     </style>
 </head>
 <body class="bg-black select-none">
@@ -21,7 +21,7 @@
     <div id="menu" class="fixed inset-0 flex items-center justify-center bg-black/80 z-50 overflow-hidden pointer-events-auto">
         <div class="bg-zinc-900 p-8 rounded-2xl border border-zinc-700 text-center max-w-md w-full mx-4 shadow-2xl">
             <h1 class="text-4xl font-black text-white mb-2 tracking-tighter">VOXEL MORPH 🔫</h1>
-            <p id="lobby-status" class="text-zinc-400 mb-6 italic text-sm">Conectando con el servidor...</p>
+            <p id="lobby-status" class="text-zinc-400 mb-6 italic text-sm">Cargando configuración...</p>
             
             <div id="controls-container" class="space-y-4">
                 <div id="player-status-msg" class="text-amber-500 text-xs font-bold uppercase tracking-widest mb-2"></div>
@@ -45,10 +45,9 @@
     <div id="ui-layer" class="fixed inset-0 pointer-events-none z-10">
         <div id="crosshair" class="absolute top-1/2 left-1/2 w-5 h-5 -translate-x-1/2 -translate-y-1/2 border-2 border-white rounded-full mix-blend-difference hidden"></div>
         <div id="status" class="absolute top-6 left-6 text-white bg-black/50 p-3 rounded-lg font-mono text-sm hidden">
-            HP: <span id="hp">100</span> | JUGADORES EN LOBBY: <span id="player-count">0</span>
+            HP: <span id="hp">100</span> | LOBBY: <span id="player-count">0</span>
         </div>
         
-        <!-- Contenedor Joystick -->
         <div id="joystick-zone" class="absolute bottom-10 left-10 w-40 h-40 hidden pointer-events-auto">
             <div class="absolute inset-0 bg-white/10 rounded-full border border-white/20"></div>
             <div id="move-knob" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-white rounded-full shadow-xl opacity-80"></div>
@@ -60,14 +59,28 @@
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, collection, query, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- Configuración e Inicialización ---
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
+        // --- MANEJO DE CONFIGURACIÓN PARA GITHUB ---
+        // Si estás en GitHub, reemplaza el objeto {} por tu configuración de Firebase Console
+        let config;
+        try {
+            config = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+                apiKey: "TU_API_KEY",
+                authDomain: "TU_PROYECTO.firebaseapp.com",
+                projectId: "TU_PROYECTO_ID",
+                storageBucket: "TU_PROYECTO.appspot.com",
+                messagingSenderId: "ID",
+                appId: "APP_ID"
+            };
+        } catch (e) {
+            console.error("Configuración no encontrada");
+        }
+
+        const app = initializeApp(config);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'voxel-morph-multi';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'voxel-morph-prod';
 
-        // --- Estado Global ---
+        // --- VARIABLES DE ESTADO ---
         let scene, camera, renderer, clock;
         let player, terrainMesh;
         let touchEnabled = false;
@@ -78,30 +91,26 @@
         let currentUser = null;
         let lobbyData = null;
         let totalConnected = 0;
-
-        let cameraDistance = 5;
-        let targetCameraDistance = 5;
+        let cameraDistance = 5, targetCameraDistance = 5;
         let pitch = 0, yaw = 0;
-
-        // Variables multitouch
         let lastPinchDist = 0;
         let lookTouchIdentifier = null;
         let lastLookX = 0, lastLookY = 0;
-
         const MIN_PLAYERS = 5;
         const keys = {};
         const raycaster = new THREE.Raycaster();
         const downVector = new THREE.Vector3(0, -1, 0);
 
-        // --- Lógica de Lobby y Firebase ---
+        // --- LÓGICA DE FIREBASE ---
         const initLobby = async () => {
+            document.getElementById('lobby-status').innerText = "Conectando...";
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
                 } else {
                     await signInAnonymously(auth);
                 }
-            } catch (err) { console.error("Error de Autenticación:", err); }
+            } catch (err) { console.error("Error Auth:", err); }
 
             onAuthStateChanged(auth, async (user) => {
                 if (!user) return;
@@ -152,25 +161,18 @@
             if (lobbyData) {
                 isHost = lobbyData.hostId === currentUser.uid;
                 const canStart = totalConnected >= MIN_PLAYERS;
+                statusEl.innerText = isHost ? "Eres el HOST" : "Conectado al Lobby";
 
                 if (isHost) {
-                    statusEl.innerText = "Eres el HOST del servidor";
                     startBtn.style.display = 'block';
-                    startBtn.innerText = canStart ? "INICIAR PARTIDA" : `ESPERANDO JUGADORES (${totalConnected}/${MIN_PLAYERS})`;
-                    
-                    if(canStart) {
-                        startBtn.disabled = false;
-                        startBtn.className = "w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-blue-400 transition-all transform hover:scale-105";
-                        pStatus.innerText = "¡LISTO PARA COMENZAR!";
-                    } else {
-                        startBtn.disabled = true;
-                        startBtn.className = "w-full py-4 bg-zinc-700 text-zinc-500 font-bold rounded-xl cursor-not-allowed opacity-50";
-                        pStatus.innerText = `FALTAN ${MIN_PLAYERS - totalConnected} JUGADORES`;
-                    }
+                    startBtn.innerText = canStart ? "INICIAR PARTIDA" : `ESPERANDO (${totalConnected}/${MIN_PLAYERS})`;
+                    startBtn.disabled = !canStart;
+                    startBtn.className = canStart ? 
+                        "w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-blue-400 transition-all" : 
+                        "w-full py-4 bg-zinc-700 text-zinc-500 font-bold rounded-xl cursor-not-allowed opacity-50";
                 } else {
-                    statusEl.innerText = "Conectado al lobby";
                     startBtn.style.display = 'none';
-                    pStatus.innerText = canStart ? "Esperando que el Host inicie..." : `Esperando jugadores (${totalConnected}/${MIN_PLAYERS})`;
+                    pStatus.innerText = canStart ? "El host iniciará pronto..." : `Esperando jugadores (${totalConnected}/${MIN_PLAYERS})`;
                 }
             }
         };
@@ -186,287 +188,166 @@
             animate();
         };
 
-        // --- Touch Engine (Joystick + Cámara + Pinch) ---
+        // --- CONTROLES TÁCTILES ---
         const initTouchControls = () => {
             const zone = document.getElementById('joystick-zone');
             const knob = document.getElementById('move-knob');
 
             window.addEventListener('touchstart', (e) => {
                 if (!touchEnabled) return;
-                for (let i = 0; i < e.changedTouches.length; i++) {
-                    const touch = e.changedTouches[i];
-                    
-                    // Lado izquierdo de la pantalla: Joystick
+                for (let touch of e.changedTouches) {
                     if (touch.clientX < window.innerWidth / 2 && !moveJoystick.active) {
                         moveJoystick.active = true;
                         moveJoystick.identifier = touch.identifier;
                         updateJoystick(touch.clientX, touch.clientY);
-                    } 
-                    // Resto de la pantalla: Cámara
-                    else if (lookTouchIdentifier === null) {
+                    } else if (lookTouchIdentifier === null) {
                         lookTouchIdentifier = touch.identifier;
-                        lastLookX = touch.clientX;
-                        lastLookY = touch.clientY;
+                        lastLookX = touch.clientX; lastLookY = touch.clientY;
                     }
                 }
-            }, { passive: false });
+            });
 
             window.addEventListener('touchmove', (e) => {
                 if (!touchEnabled) return;
                 e.preventDefault();
-
-                // Gesto de pinza (dos dedos) para Zoom
                 if (e.touches.length === 2) {
                     const d = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
-                    if (lastPinchDist > 0) {
-                        const delta = (lastPinchDist - d) * 0.05;
-                        targetCameraDistance = Math.max(0, Math.min(12, targetCameraDistance + delta));
-                    }
+                    if (lastPinchDist > 0) targetCameraDistance = Math.max(0, Math.min(12, targetCameraDistance + (lastPinchDist - d) * 0.05));
                     lastPinchDist = d;
                     return;
                 }
-
-                for (let i = 0; i < e.changedTouches.length; i++) {
-                    const touch = e.changedTouches[i];
-                    
-                    if (touch.identifier === moveJoystick.identifier) {
-                        updateJoystick(touch.clientX, touch.clientY);
-                    } else if (touch.identifier === lookTouchIdentifier) {
-                        const dx = touch.clientX - lastLookX;
-                        const dy = touch.clientY - lastLookY;
-                        yaw -= dx * 0.005;
-                        pitch = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, pitch - dy * 0.005));
-                        lastLookX = touch.clientX;
-                        lastLookY = touch.clientY;
+                for (let touch of e.changedTouches) {
+                    if (touch.identifier === moveJoystick.identifier) updateJoystick(touch.clientX, touch.clientY);
+                    else if (touch.identifier === lookTouchIdentifier) {
+                        yaw -= (touch.clientX - lastLookX) * 0.005;
+                        pitch = Math.max(-1.4, Math.min(1.4, pitch - (touch.clientY - lastLookY) * 0.005));
+                        lastLookX = touch.clientX; lastLookY = touch.clientY;
                     }
                 }
             }, { passive: false });
 
             window.addEventListener('touchend', (e) => {
                 lastPinchDist = 0;
-                for (let i = 0; i < e.changedTouches.length; i++) {
-                    const touch = e.changedTouches[i];
+                for (let touch of e.changedTouches) {
                     if (touch.identifier === moveJoystick.identifier) {
-                        moveJoystick.active = false;
-                        moveJoystick.identifier = null;
-                        moveJoystick.x = 0; moveJoystick.y = 0;
+                        moveJoystick.active = false; moveJoystick.x = 0; moveJoystick.y = 0;
                         knob.style.transform = `translate(-50%, -50%)`;
                     }
-                    if (touch.identifier === lookTouchIdentifier) {
-                        lookTouchIdentifier = null;
-                    }
+                    if (touch.identifier === lookTouchIdentifier) lookTouchIdentifier = null;
                 }
             });
 
             function updateJoystick(tx, ty) {
                 const rect = zone.getBoundingClientRect();
-                const centerX = rect.left + rect.width / 2;
-                const centerY = rect.top + rect.height / 2;
-                const dx = tx - centerX;
-                const dy = ty - centerY;
+                const centerX = rect.left + rect.width / 2, centerY = rect.top + rect.height / 2;
+                const dx = tx - centerX, dy = ty - centerY;
                 const dist = Math.min(rect.width / 2, Math.hypot(dx, dy));
                 const angle = Math.atan2(dy, dx);
-                
-                const kx = Math.cos(angle) * dist;
-                const ky = Math.sin(angle) * dist;
-                knob.style.transform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px))`;
-                
-                moveJoystick.x = kx / (rect.width / 2);
-                moveJoystick.y = ky / (rect.height / 2);
+                knob.style.transform = `translate(calc(-50% + ${Math.cos(angle)*dist}px), calc(-50% + ${Math.sin(angle)*dist}px))`;
+                moveJoystick.x = (Math.cos(angle)*dist) / (rect.width/2);
+                moveJoystick.y = (Math.sin(angle)*dist) / (rect.height/2);
             }
         };
 
-        // --- Motor 3D ---
+        // --- ENGINE 3D ---
         function initEngine() {
             if (gameInitialized) return;
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x87ceeb);
-            scene.fog = new THREE.FogExp2(0x87ceeb, 0.012);
-
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 1000);
+            scene.fog = new THREE.FogExp2(0x87ceeb, 0.01);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
             document.body.appendChild(renderer.domElement);
-
-            const light = new THREE.DirectionalLight(0xffffff, 1.2);
-            light.position.set(50, 100, 50);
-            scene.add(light, new THREE.AmbientLight(0xffffff, 0.6));
-
+            scene.add(new THREE.DirectionalLight(0xffffff, 1), new THREE.AmbientLight(0xffffff, 0.5));
             clock = new THREE.Clock();
             generateTerrain();
             createPlayer();
             initTouchControls();
-            
             gameInitialized = true;
             document.getElementById('crosshair').classList.remove('hidden');
             document.getElementById('status').classList.remove('hidden');
-
             setInterval(syncPlayerData, 100);
         }
 
-        const syncPlayerData = async () => {
-            if (!gameInitialized || !currentUser) return;
-            const playerRef = doc(db, 'artifacts', appId, 'public', 'data', 'players', currentUser.uid);
-            await setDoc(playerRef, {
-                pos: { x: player.position.x, y: player.position.y, z: player.position.z },
-                rot: player.mesh.rotation.y,
-                hp: player.hp,
-                lastSeen: serverTimestamp()
-            });
-        };
-
-        const generatePowerUpsInDB = async () => {
-            if (!isHost) return;
-            const puCol = collection(db, 'artifacts', appId, 'public', 'data', 'powerups');
-            for(let i=0; i<12; i++) {
-                const x = Math.random()*120-60;
-                const z = Math.random()*120-60;
-                const type = Math.random() > 0.5 ? 'health' : 'ammo';
-                await setDoc(doc(puCol), { x, z, type });
-            }
-        };
-
-        function getTerrainHeightAt(x, z) {
-            if (Math.abs(x) > 78 || Math.abs(z) > 78) return 15; 
-            return Math.sin(x * 0.08) * Math.cos(z * 0.08) * 4 + Math.sin(x * 0.04 + z * 0.04) * 6;
-        }
-
         function generateTerrain() {
-            const size = 160, segments = 80; 
-            const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
-            const pos = geometry.attributes.position;
-            for (let i = 0; i < pos.count; i++) pos.setZ(i, getTerrainHeightAt(pos.getX(i), pos.getY(i)));
-            geometry.computeVertexNormals();
-            terrainMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0x4a9b4a, roughness: 0.8 }));
+            const geo = new THREE.PlaneGeometry(160, 160, 80, 80);
+            const pos = geo.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+                const x = pos.getX(i), z = pos.getY(i);
+                pos.setZ(i, Math.abs(x)>78 || Math.abs(z)>78 ? 15 : Math.sin(x*0.08)*Math.cos(z*0.08)*4 + Math.sin(x*0.04+z*0.04)*6);
+            }
+            geo.computeVertexNormals();
+            terrainMesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x44aa44 }));
             terrainMesh.rotation.x = -Math.PI / 2;
             scene.add(terrainMesh);
         }
 
-        function createCharacterMesh(color = 0x333333) {
-            const group = new THREE.Group();
-            const mat = new THREE.MeshStandardMaterial({ color });
-            const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.9, 0.4), mat);
-            body.position.y = 1.05;
-            const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), mat);
-            head.position.y = 1.7;
-            const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2), mat);
-            legL.position.set(-0.15, 0.3, 0);
-            const legR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2), mat);
-            legR.position.set(0.15, 0.3, 0);
-            group.add(head, body, legL, legR);
-            return group;
-        }
-
         function createPlayer() {
             player = new THREE.Group();
-            player.mesh = createCharacterMesh(0x2196f3);
-            player.add(player.mesh);
-            scene.add(player);
-            player.position.set(0, 20, 0);
-            player.velocity = new THREE.Vector3(0, 0, 0);
-            player.hp = 100;
+            const mat = new THREE.MeshStandardMaterial({ color: 0x2196f3 });
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.2, 0.4), mat); body.position.y = 0.6;
+            player.add(body); player.mesh = body;
+            scene.add(player); player.position.set(0, 10, 0); player.velocity = new THREE.Vector3(); player.hp = 100;
         }
 
+        const syncPlayerData = async () => {
+            if (!gameInitialized || !currentUser) return;
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', currentUser.uid), {
+                pos: { x: player.position.x, y: player.position.y, z: player.position.z },
+                rot: player.mesh.rotation.y, hp: player.hp, lastSeen: serverTimestamp()
+            });
+        };
+
+        const generatePowerUpsInDB = async () => {
+            const col = collection(db, 'artifacts', appId, 'public', 'data', 'powerups');
+            for(let i=0; i<12; i++) await setDoc(doc(col), { x: Math.random()*120-60, z: Math.random()*120-60, type: Math.random()>0.5?'health':'ammo' });
+        };
+
         const spawnPowerUpMesh = (id, data) => {
-            const geo = new THREE.BoxGeometry(0.6, 0.6, 0.6);
-            const mat = new THREE.MeshStandardMaterial({ color: data.type === 'health' ? 0xff4444 : 0xffdd44, emissive: data.type === 'health' ? 0x220000 : 0x222200 });
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.position.set(data.x, getTerrainHeightAt(data.x, data.z) + 0.8, data.z);
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshStandardMaterial({ color: data.type==='health'?0xff4444:0xffcc44 }));
+            mesh.position.set(data.x, 2, data.z); // Altura simplificada
             mesh.userData = { id, type: data.type };
-            scene.add(mesh);
-            powerUps.push(mesh);
+            scene.add(mesh); powerUps.push(mesh);
         };
 
         const removePowerUpMesh = (id) => {
-            const index = powerUps.findIndex(p => p.userData.id === id);
-            if (index !== -1) { scene.remove(powerUps[index]); powerUps.splice(index, 1); }
+            const i = powerUps.findIndex(p => p.userData.id === id);
+            if (i !== -1) { scene.remove(powerUps[i]); powerUps.splice(i, 1); }
         };
 
         const updateRemotePlayer = (id, data) => {
             if (!remotePlayers[id]) {
-                const p = new THREE.Group();
-                p.mesh = createCharacterMesh(0xff5555);
-                p.add(p.mesh);
-                scene.add(p);
-                remotePlayers[id] = p;
+                remotePlayers[id] = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.2, 0.4), new THREE.MeshStandardMaterial({ color: 0xff4444 }));
+                scene.add(remotePlayers[id]);
             }
-            const p = remotePlayers[id];
-            p.position.lerp(new THREE.Vector3(data.pos.x, data.pos.y, data.pos.z), 0.2);
-            p.mesh.rotation.y = data.rot;
+            remotePlayers[id].position.lerp(new THREE.Vector3(data.pos.x, data.pos.y, data.pos.z), 0.2);
         };
 
-        const removeRemotePlayer = (id) => {
-            if (remotePlayers[id]) { scene.remove(remotePlayers[id]); delete remotePlayers[id]; }
-        };
-
-        function applyPhysics(entity, motion, delta) {
-            const gravity = 35;
-            entity.position.x += motion.x;
-            entity.position.z += motion.z;
-            entity.velocity.y -= gravity * delta;
-            entity.position.y += entity.velocity.y * delta;
-
-            const offsets = [{x:0.2,z:0.1},{x:-0.2,z:0.1},{x:0.2,z:-0.1},{x:-0.2,z:-0.1}];
-            let maxHeight = -Infinity;
-            for (const offset of offsets) {
-                const origin = entity.position.clone().add(new THREE.Vector3(offset.x, 2.5, offset.z));
-                raycaster.set(origin, downVector);
-                const intersects = raycaster.intersectObject(terrainMesh);
-                if (intersects.length > 0) {
-                    const hitY = intersects[0].point.y;
-                    if (hitY > maxHeight) maxHeight = hitY;
-                }
-            }
-            if (entity.position.y <= maxHeight) {
-                entity.position.y = maxHeight;
-                entity.velocity.y = 0;
-                entity.onGround = true;
-            } else entity.onGround = false;
-        }
+        const removeRemotePlayer = (id) => { if (remotePlayers[id]) { scene.remove(remotePlayers[id]); delete remotePlayers[id]; } };
 
         function updateMovement(delta) {
-            let moveX = 0, moveZ = 0;
-            if (keys['KeyW']) moveZ -= 1;
-            if (keys['KeyS']) moveZ += 1;
-            if (keys['KeyA']) moveX -= 1;
-            if (keys['KeyD']) moveX += 1;
-            if (touchEnabled && moveJoystick.active) { moveX = moveJoystick.x; moveZ = moveJoystick.y; }
+            let mx = 0, mz = 0;
+            if (keys['KeyW']) mz -= 1; if (keys['KeyS']) mz += 1;
+            if (keys['KeyA']) mx -= 1; if (keys['KeyD']) mx += 1;
+            if (touchEnabled && moveJoystick.active) { mx = moveJoystick.x; mz = moveJoystick.y; }
 
-            const moveDir = new THREE.Vector3(moveX, 0, moveZ).normalize();
-            moveDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-            const motion = moveDir.multiplyScalar(15 * delta);
-            applyPhysics(player, motion, delta);
-
-            if (keys['Space'] && player.onGround) player.velocity.y = 12;
-
-            if (moveX !== 0 || moveZ !== 0) {
-                const anim = Math.sin(Date.now() * 0.01) * 0.5;
-                player.mesh.children[2].rotation.x = anim;
-                player.mesh.children[3].rotation.x = -anim;
-                if (cameraDistance > 0.8) {
-                    const localMoveDir = new THREE.Vector3(moveX, 0, moveZ).normalize();
-                    player.mesh.rotation.y = THREE.MathUtils.lerp(player.mesh.rotation.y, Math.atan2(localMoveDir.x, localMoveDir.z), 0.15);
-                }
-            }
+            const dir = new THREE.Vector3(mx, 0, mz).normalize().applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
+            player.position.add(dir.multiplyScalar(15 * delta));
+            player.velocity.y -= 30 * delta;
+            player.position.y += player.velocity.y * delta;
+            
+            // Suelo simple para demo
+            if (player.position.y < 0) { player.position.y = 0; player.velocity.y = 0; }
+            if (keys['Space'] && player.position.y <= 0) player.velocity.y = 10;
             
             powerUps.forEach(async pu => {
                 if (player.position.distanceTo(pu.position) < 1.5) {
                     if (pu.userData.type === 'health') player.hp = Math.min(100, player.hp + 20);
-                    try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'powerups', pu.userData.id)); } catch (e) {}
+                    try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'powerups', pu.userData.id)); } catch(e){}
                 }
             });
-        }
-
-        function updateCamera() {
-            cameraDistance = THREE.MathUtils.lerp(cameraDistance, targetCameraDistance, 0.1);
-            player.mesh.visible = cameraDistance >= 0.6;
-            const targetPos = player.position.clone().add(new THREE.Vector3(0, 1.7, 0));
-            const offset = new THREE.Vector3(0, 0, Math.max(0.01, cameraDistance))
-                .applyAxisAngle(new THREE.Vector3(1, 0, 0), pitch)
-                .applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-            camera.position.copy(targetPos).add(offset);
-            camera.lookAt(targetPos.clone().add(new THREE.Vector3(0, -pitch*0.5, 0)));
         }
 
         function animate() {
@@ -474,32 +355,23 @@
             if (!gameInitialized) return;
             const delta = Math.min(clock.getDelta(), 0.1);
             updateMovement(delta);
-            updateCamera();
+            cameraDistance = THREE.MathUtils.lerp(cameraDistance, targetCameraDistance, 0.1);
+            const targetPos = player.position.clone().add(new THREE.Vector3(0, 1.5, 0));
+            camera.position.copy(targetPos).add(new THREE.Vector3(0, 0, cameraDistance).applyAxisAngle(new THREE.Vector3(1,0,0), pitch).applyAxisAngle(new THREE.Vector3(0,1,0), yaw));
+            camera.lookAt(targetPos);
             renderer.render(scene, camera);
             document.getElementById('hp').innerText = Math.round(player.hp);
         }
 
         window.addEventListener('keydown', e => keys[e.code] = true);
         window.addEventListener('keyup', e => keys[e.code] = false);
-        window.addEventListener('mousemove', e => {
-            if (document.pointerLockElement === renderer?.domElement) {
-                yaw -= e.movementX * 0.002;
-                pitch = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, pitch - e.movementY * 0.002));
-            }
-        });
-        window.addEventListener('wheel', e => {
-            targetCameraDistance = Math.max(0, Math.min(12, targetCameraDistance + e.deltaY * 0.005));
-        });
-        window.addEventListener('mousedown', () => {
-            if (!gameInitialized || touchEnabled) return;
-            if (document.pointerLockElement !== renderer.domElement) renderer.domElement.requestPointerLock();
-        });
-
+        window.addEventListener('mousemove', e => { if (document.pointerLockElement) { yaw -= e.movementX*0.002; pitch = Math.max(-1.4, Math.min(1.4, pitch - e.movementY*0.002)); } });
+        window.addEventListener('wheel', e => targetCameraDistance = Math.max(0.5, Math.min(12, targetCameraDistance + e.deltaY*0.005)));
+        window.addEventListener('mousedown', () => { if (gameInitialized && !touchEnabled) renderer.domElement.requestPointerLock(); });
         document.getElementById('btn-start').onclick = startSimulation;
         document.getElementById('touch-toggle').onchange = (e) => {
             touchEnabled = e.target.checked;
             document.getElementById('joystick-zone').style.display = touchEnabled ? 'block' : 'none';
-            if (touchEnabled && document.pointerLockElement) document.exitPointerLock();
         };
 
         window.onload = initLobby;
